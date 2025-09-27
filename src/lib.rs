@@ -12,16 +12,27 @@ pub enum Action {
     PullOrb,
     CashOut,
     EnterShop,
-    BuyOrb,
+    BuyOrb(InShopSlot),
     GoToNextLevel,
+}
+
+pub enum InShopSlot {
+    One,
+    Two,
+    Three,
+    Four,
+    Five,
+    Six,
 }
 
 pub enum ActionError {
     InvalidActionInNewGame,
     InvalidActionInLevel,
-    InvalidActionInShop,
-    NoPointsToCashOut,
     MilestoneNotMetYet,
+    NoPointsToCashOut,
+    InvalidActionInShop,
+    OrbTooExpensive,
+    UnreachableNonBuyableInShop,
     GameOver,
 }
 
@@ -92,6 +103,7 @@ pub fn perform_action(game: &mut Game, action: Action) -> Result<(), ActionError
                     sale_orbs_indices.extend(selected_common);
                     sale_orbs_indices.extend(selected_rare);
                     sale_orbs_indices.extend(selected_cosmic);
+                    assert!(sale_orbs_indices.len() == 6);
 
                     let game_data = GameData {
                         sale_orbs_indices,
@@ -105,7 +117,31 @@ pub fn perform_action(game: &mut Game, action: Action) -> Result<(), ActionError
             }
         }
         (Game::Level { .. }, _) => Err(ActionError::InvalidActionInLevel),
-        (Game::Shop { game_data }, Action::BuyOrb) => todo!(),
+        (Game::Shop { game_data }, Action::BuyOrb(shop_slot)) => {
+            let selector_idx = shop_slot as usize;
+            let orb_idx = game_data.sale_orbs_indices[selector_idx];
+
+            match game_data.all_orbs[orb_idx].buyable {
+                Buyable::No => Err(ActionError::UnreachableNonBuyableInShop),
+                Buyable::Yes {
+                    base_price,
+                    current_price,
+                } => match game_data.glitch_chips > current_price {
+                    true => {
+                        let mut game_data = game_data.clone();
+                        game_data.glitch_chips -= current_price;
+                        game_data.all_orbs[orb_idx].count += 1;
+                        game_data.all_orbs[orb_idx].buyable = Buyable::Yes {
+                            base_price,
+                            current_price: (current_price as f32 * 1.2).ceil() as u32,
+                        };
+                        *game = Game::Shop { game_data };
+                        Ok(())
+                    }
+                    false => Err(ActionError::OrbTooExpensive),
+                },
+            }
+        }
         (Game::Shop { game_data }, Action::GoToNextLevel) => {
             *game = Game::Level {
                 game_data: GameData::next_level_game_data(game_data),
