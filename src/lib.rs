@@ -46,14 +46,6 @@ pub fn perform_action(game: &mut Game, action: Action) -> Result<(), ActionError
             };
             Ok(())
         }
-        (Game::Level { game_data }, Action::CashOut) => match game_data.points == 0 {
-            true => Err(ActionError::NoPointsToCashOut),
-            false => {
-                let moonrocks_diff = calculate_moonrocks_diff(game_data);
-                *game = Game::GameOver { moonrocks_diff };
-                Ok(())
-            }
-        },
         (Game::Level { game_data }, Action::PullOrb) => {
             let mut game_data = game_data.clone();
 
@@ -88,37 +80,14 @@ pub fn perform_action(game: &mut Game, action: Action) -> Result<(), ActionError
                 }
             }
         }
-        (Game::Shop { game_data }, Action::BuyOrb(shop_slot)) => {
-            let selector_idx = shop_slot as usize;
-            let orb_idx = game_data.sale_orbs_indices[selector_idx];
-
-            match game_data.all_orbs[orb_idx].buyable {
-                Buyable::No => Err(ActionError::BrokenErrorNonBuyableInShop),
-                Buyable::Yes {
-                    base_price,
-                    current_price,
-                } => match game_data.glitch_chips > current_price {
-                    true => {
-                        let mut game_data = game_data.clone();
-                        game_data.glitch_chips -= current_price;
-                        game_data.all_orbs[orb_idx].count += 1;
-                        game_data.all_orbs[orb_idx].buyable = Buyable::Yes {
-                            base_price,
-                            current_price: (current_price as f32 * 1.2).ceil() as u32,
-                        };
-                        *game = Game::Shop { game_data };
-                        Ok(())
-                    }
-                    false => Err(ActionError::OrbTooExpensive),
-                },
+        (Game::Level { game_data }, Action::CashOut) => match game_data.points == 0 {
+            true => Err(ActionError::NoPointsToCashOut),
+            false => {
+                let moonrocks_diff = calculate_moonrocks_diff(game_data);
+                *game = Game::GameOver { moonrocks_diff };
+                Ok(())
             }
-        }
-        (Game::Shop { game_data }, Action::GoToNextLevel) => {
-            *game = Game::Level {
-                game_data: GameData::next_level_game_data(game_data),
-            };
-            Ok(())
-        }
+        },
         (Game::LevelComplete { game_data }, Action::CashOut) => match game_data.points == 0 {
             true => Err(ActionError::NoPointsToCashOut),
             false => {
@@ -179,6 +148,37 @@ pub fn perform_action(game: &mut Game, action: Action) -> Result<(), ActionError
             };
 
             *game = Game::Shop { game_data };
+            Ok(())
+        }
+        (Game::Shop { game_data }, Action::BuyOrb(shop_slot)) => {
+            let selector_idx = shop_slot as usize;
+            let orb_idx = game_data.sale_orbs_indices[selector_idx];
+
+            match game_data.all_orbs[orb_idx].buyable {
+                Buyable::No => Err(ActionError::BrokenErrorNonBuyableInShop),
+                Buyable::Yes {
+                    base_price,
+                    current_price,
+                } => match game_data.glitch_chips > current_price {
+                    true => {
+                        let mut game_data = game_data.clone();
+                        game_data.glitch_chips -= current_price;
+                        game_data.all_orbs[orb_idx].count += 1;
+                        game_data.all_orbs[orb_idx].buyable = Buyable::Yes {
+                            base_price,
+                            current_price: (current_price as f32 * 1.2).ceil() as u32,
+                        };
+                        *game = Game::Shop { game_data };
+                        Ok(())
+                    }
+                    false => Err(ActionError::OrbTooExpensive),
+                },
+            }
+        }
+        (Game::Shop { game_data }, Action::GoToNextLevel) => {
+            *game = Game::Level {
+                game_data: GameData::next_level_game_data(game_data),
+            };
             Ok(())
         }
         (Game::New, _) => Err(ActionError::InvalidActionInNewGame),
