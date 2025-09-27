@@ -1,7 +1,9 @@
+use rand::seq::IndexedRandom;
+
 pub enum Game {
     New,
     Level { game_data: GameData },
-    InShop { game_data: GameData },
+    Shop { game_data: GameData },
     Complete { moonrocks_diff: i32 },
 }
 
@@ -19,6 +21,7 @@ pub enum ActionError {
     InvalidActionInLevel,
     InvalidActionInShop,
     NoPointsToCashOut,
+    MilestoneNotMetYet,
     GameOver,
 }
 
@@ -43,20 +46,78 @@ pub fn perform_action(game: &mut Game, action: Action) -> Result<(), ActionError
             }
         },
         (Game::Level { game_data }, Action::PullOrb) => todo!(),
-        (Game::Level { game_data }, Action::EnterShop) => todo!(),
+        (Game::Level { game_data }, Action::EnterShop) => {
+            match game_data.points >= game_data.milestone {
+                true => {
+                    // filter buyable orbs of each rarity
+                    let common_indices: Vec<usize> = game_data
+                        .all_orbs
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, orb)| orb.is_common() && orb.is_buyable())
+                        .map(|(i, _)| i)
+                        .collect();
+                    let rare_indices: Vec<usize> = game_data
+                        .all_orbs
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, orb)| orb.is_rare() && orb.is_buyable())
+                        .map(|(i, _)| i)
+                        .collect();
+                    let cosmic_indices: Vec<usize> = game_data
+                        .all_orbs
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, orb)| orb.is_cosmic() && orb.is_buyable())
+                        .map(|(i, _)| i)
+                        .collect();
+
+                    // randomly select 3 common, 2 rare, and 1 cosmic for shop
+                    let mut rng = rand::rng();
+                    let mut sale_orbs_indices = Vec::new();
+
+                    let selected_common: Vec<usize> = common_indices
+                        .choose_multiple(&mut rng, 3)
+                        .cloned()
+                        .collect();
+
+                    let selected_rare: Vec<usize> =
+                        rare_indices.choose_multiple(&mut rng, 2).cloned().collect();
+
+                    let selected_cosmic: Vec<usize> = cosmic_indices
+                        .choose_multiple(&mut rng, 1)
+                        .cloned()
+                        .collect();
+
+                    sale_orbs_indices.extend(selected_common);
+                    sale_orbs_indices.extend(selected_rare);
+                    sale_orbs_indices.extend(selected_cosmic);
+
+                    let game_data = GameData {
+                        sale_orbs_indices,
+                        ..game_data.clone()
+                    };
+
+                    *game = Game::Shop { game_data };
+                    Ok(())
+                }
+                false => Err(ActionError::MilestoneNotMetYet),
+            }
+        }
         (Game::Level { .. }, _) => Err(ActionError::InvalidActionInLevel),
-        (Game::InShop { game_data }, Action::BuyOrb) => todo!(),
-        (Game::InShop { game_data }, Action::GoToNextLevel) => {
+        (Game::Shop { game_data }, Action::BuyOrb) => todo!(),
+        (Game::Shop { game_data }, Action::GoToNextLevel) => {
             *game = Game::Level {
                 game_data: GameData::next_level_game_data(game_data),
             };
             Ok(())
         }
-        (Game::InShop { .. }, _) => Err(ActionError::InvalidActionInShop),
+        (Game::Shop { .. }, _) => Err(ActionError::InvalidActionInShop),
         (Game::Complete { .. }, _) => Err(ActionError::GameOver),
     }
 }
 
+#[derive(Clone)]
 pub struct GameData {
     pub level: u32,
     pub points: u32,
@@ -68,6 +129,7 @@ pub struct GameData {
     pub moonrocks_spent: u32,
     pub moonrocks_earned: u32,
     pub all_orbs: [Orb; 21],
+    pub sale_orbs_indices: Vec<usize>,
     pub pullable_orb_effects: Vec<OrbEffect>,
     pub pulled_orbs_effects: Vec<OrbEffect>,
 }
@@ -93,6 +155,7 @@ impl GameData {
             moonrocks_spent: 10,
             moonrocks_earned: 0,
             all_orbs,
+            sale_orbs_indices: Vec::new(),
             pullable_orb_effects,
             pulled_orbs_effects: Vec::new(),
         }
@@ -234,9 +297,28 @@ impl Orb {
     pub fn to_orb_effects(&self) -> Vec<OrbEffect> {
         vec![self.effect.clone(); self.count as usize]
     }
+
+    pub fn is_common(&self) -> bool {
+        self.rarity == OrbRarity::Common
+    }
+
+    pub fn is_rare(&self) -> bool {
+        self.rarity == OrbRarity::Rare
+    }
+
+    pub fn is_cosmic(&self) -> bool {
+        self.rarity == OrbRarity::Cosmic
+    }
+
+    pub fn is_buyable(&self) -> bool {
+        match self.buyable {
+            Buyable::Yes { .. } => true,
+            _ => false,
+        }
+    }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub enum OrbRarity {
     Common,
     Rare,
