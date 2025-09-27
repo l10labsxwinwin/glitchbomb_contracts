@@ -1,3 +1,5 @@
+use std::array;
+
 pub enum Game {
     New,
     InLevel { game_data: GameData },
@@ -5,7 +7,7 @@ pub enum Game {
     Complete { moonrocks_diff: i32 },
 }
 
-pub enum Actions {
+pub enum Action {
     StartGame,
     PullOrb,
     CashOut,
@@ -14,7 +16,14 @@ pub enum Actions {
     GoToNextLevel,
 }
 
-#[derive(Default)]
+pub enum ActionError {
+    InvalidAction,
+}
+
+pub fn perform_action(game: &mut Game, action: Action) -> Result<(), ActionError> {
+    Ok(())
+}
+
 pub struct GameData {
     pub level: u32,
     pub points: u32,
@@ -25,17 +34,140 @@ pub struct GameData {
     pub glitch_chips: u32,
     pub moonrocks_spent: u32,
     pub moonrocks_earned: u32,
-    pub all_orbs: Vec<Orb>,
+    pub all_orbs: [Orb; 21],
     pub pullable_orb_effects: Vec<OrbEffect>,
     pub pulled_orbs_effects: Vec<OrbEffect>,
 }
 
+impl GameData {
+    fn new() -> Self {
+        Self {
+            level: 1,
+            points: 0,
+            milestone: 12,
+            hp: 5,
+            max_hp: 5,
+            multiplier: 1.,
+            glitch_chips: 0,
+            moonrocks_spent: 10,
+            moonrocks_earned: 0,
+            all_orbs: Orb::all_orbs(),
+            pullable_orb_effects: todo!(),
+            pulled_orbs_effects: todo!(),
+        }
+    }
+}
+
 pub struct Orb {
-    pub orb_effect: OrbEffect,
+    pub effect: OrbEffect,
     pub rarity: OrbRarity,
     pub count: u32,
-    pub base_price: u32,
-    pub current_price: u32,
+    pub buyable: Buyable,
+}
+
+impl Orb {
+    pub fn new(effect: OrbEffect, rarity: OrbRarity, count: u32, buyable: Buyable) -> Self {
+        Orb {
+            effect,
+            rarity,
+            count,
+            buyable,
+        }
+    }
+
+    pub fn bomb(damage: u32, count: u32, buyable: Buyable) -> Self {
+        Self::new(OrbEffect::Bomb(damage), OrbRarity::Common, count, buyable)
+    }
+
+    pub fn point(points: u32, count: u32, rarity: OrbRarity, buyable: Buyable) -> Self {
+        Self::new(OrbEffect::Point(points), rarity, count, buyable)
+    }
+
+    pub fn point_per_orb_remaining(
+        points_per_orb: u32,
+        count: u32,
+        rarity: OrbRarity,
+        buyable: Buyable,
+    ) -> Self {
+        Self::new(
+            OrbEffect::PointPerOrbRemaining(points_per_orb),
+            rarity,
+            count,
+            buyable,
+        )
+    }
+
+    pub fn point_per_bomb_pulled(
+        points_per_bomb: u32,
+        count: u32,
+        rarity: OrbRarity,
+        buyable: Buyable,
+    ) -> Self {
+        Self::new(
+            OrbEffect::PointPerBombPulled(points_per_bomb),
+            rarity,
+            count,
+            buyable,
+        )
+    }
+
+    pub fn glitch_chips(chips: u32, count: u32, rarity: OrbRarity, buyable: Buyable) -> Self {
+        Self::new(OrbEffect::GlitchChips(chips), rarity, count, buyable)
+    }
+
+    pub fn moonrocks(amount: u32, count: u32, rarity: OrbRarity, buyable: Buyable) -> Self {
+        Self::new(OrbEffect::Moonrocks(amount), rarity, count, buyable)
+    }
+
+    pub fn health(hp: u32, count: u32, rarity: OrbRarity, buyable: Buyable) -> Self {
+        Self::new(OrbEffect::Health(hp), rarity, count, buyable)
+    }
+
+    pub fn multiplier(mult: f32, count: u32, rarity: OrbRarity, buyable: Buyable) -> Self {
+        Self::new(OrbEffect::Multiplier(mult), rarity, count, buyable)
+    }
+
+    pub fn point_rewind(count: u32, rarity: OrbRarity, buyable: Buyable) -> Self {
+        Self::new(OrbEffect::PointRewind, rarity, count, buyable)
+    }
+
+    pub fn five_or_die(count: u32, rarity: OrbRarity, buyable: Buyable) -> Self {
+        Self::new(OrbEffect::FiveOrDie, rarity, count, buyable)
+    }
+
+    pub fn bomb_immunity(count: u32, rarity: OrbRarity, buyable: Buyable) -> Self {
+        Self::new(OrbEffect::BombImmunity, rarity, count, buyable)
+    }
+
+    pub fn all_orbs() -> [Orb; 21] {
+        [
+            // non-buyables
+            Self::bomb(1, 2, Buyable::not_buyable()),
+            Self::bomb(2, 1, Buyable::not_buyable()),
+            Self::bomb(3, 1, Buyable::not_buyable()),
+            Self::point_per_orb_remaining(1, 1, OrbRarity::Common, Buyable::not_buyable()),
+            // common buyables
+            Self::point(5, 3, OrbRarity::Common, Buyable::buyable(5)),
+            Self::glitch_chips(15, 0, OrbRarity::Common, Buyable::buyable(5)),
+            Self::five_or_die(0, OrbRarity::Common, Buyable::buyable(5)),
+            Self::point_per_bomb_pulled(4, 1, OrbRarity::Common, Buyable::buyable(6)),
+            Self::point(7, 0, OrbRarity::Common, Buyable::buyable(8)),
+            Self::moonrocks(15, 0, OrbRarity::Common, Buyable::buyable(8)),
+            Self::point_rewind(0, OrbRarity::Common, Buyable::buyable(8)),
+            Self::multiplier(0.5, 0, OrbRarity::Common, Buyable::buyable(9)),
+            Self::health(1, 1, OrbRarity::Common, Buyable::buyable(9)),
+            // rare buyables
+            Self::point(8, 0, OrbRarity::Rare, Buyable::buyable(11)),
+            Self::point(9, 0, OrbRarity::Rare, Buyable::buyable(13)),
+            Self::multiplier(1.0, 1, OrbRarity::Rare, Buyable::buyable(14)),
+            Self::point_per_orb_remaining(2, 0, OrbRarity::Rare, Buyable::buyable(15)),
+            Self::multiplier(1.5, 0, OrbRarity::Rare, Buyable::buyable(16)),
+            // cosmic buyables
+            Self::health(3, 0, OrbRarity::Cosmic, Buyable::buyable(21)),
+            Self::moonrocks(40, 0, OrbRarity::Cosmic, Buyable::buyable(23)),
+            Self::bomb_immunity(0, OrbRarity::Cosmic, Buyable::buyable(24)),
+        ]
+    }
 }
 
 pub enum OrbRarity {
@@ -45,8 +177,33 @@ pub enum OrbRarity {
 }
 
 pub enum OrbEffect {
-    Health { healing: u32 },
-    Point { points: u32 },
-    Bomb { damage: u32 },
-    Multiplier { additional_mult: f32 },
+    Point(u32),
+    PointPerOrbRemaining(u32),
+    PointPerBombPulled(u32),
+    GlitchChips(u32),
+    Moonrocks(u32),
+    Health(u32),
+    Bomb(u32),
+    Multiplier(f32),
+    PointRewind,
+    FiveOrDie,
+    BombImmunity,
+}
+
+pub enum Buyable {
+    No,
+    Yes { base_price: u32, current_price: u32 },
+}
+
+impl Buyable {
+    pub fn not_buyable() -> Self {
+        Buyable::No
+    }
+
+    pub fn buyable(base_price: u32) -> Self {
+        Buyable::Yes {
+            base_price,
+            current_price: base_price,
+        }
+    }
 }
