@@ -1,6 +1,6 @@
 pub enum Game {
     New,
-    InLevel { game_data: GameData },
+    Level { game_data: GameData },
     InShop { game_data: GameData },
     Complete { moonrocks_diff: i32 },
 }
@@ -15,11 +15,46 @@ pub enum Action {
 }
 
 pub enum ActionError {
-    InvalidAction,
+    InvalidActionInNewGame,
+    InvalidActionInLevel,
+    InvalidActionInShop,
+    NoPointsToCashOut,
+    GameOver,
 }
 
 pub fn perform_action(game: &mut Game, action: Action) -> Result<(), ActionError> {
-    Ok(())
+    match (&game, action) {
+        (Game::New, Action::StartGame) => {
+            *game = Game::Level {
+                game_data: GameData::new(),
+            };
+            Ok(())
+        }
+        (Game::New, _) => Err(ActionError::InvalidActionInNewGame),
+        (Game::Level { game_data }, Action::CashOut) => match game_data.points == 0 {
+            true => Err(ActionError::NoPointsToCashOut),
+            false => {
+                let mut moonrocks_diff = 0;
+                moonrocks_diff += game_data.points as i32;
+                moonrocks_diff += game_data.moonrocks_earned as i32;
+                moonrocks_diff -= game_data.moonrocks_spent as i32;
+                *game = Game::Complete { moonrocks_diff };
+                Ok(())
+            }
+        },
+        (Game::Level { game_data }, Action::PullOrb) => todo!(),
+        (Game::Level { game_data }, Action::EnterShop) => todo!(),
+        (Game::Level { .. }, _) => Err(ActionError::InvalidActionInLevel),
+        (Game::InShop { game_data }, Action::BuyOrb) => todo!(),
+        (Game::InShop { game_data }, Action::GoToNextLevel) => {
+            *game = Game::Level {
+                game_data: GameData::next_level_game_data(game_data),
+            };
+            Ok(())
+        }
+        (Game::InShop { .. }, _) => Err(ActionError::InvalidActionInShop),
+        (Game::Complete { .. }, _) => Err(ActionError::GameOver),
+    }
 }
 
 pub struct GameData {
@@ -53,7 +88,7 @@ impl GameData {
             milestone: Self::MILESTONES[0],
             hp: 5,
             max_hp: 5,
-            multiplier: 1.,
+            multiplier: 1.0,
             glitch_chips: 0,
             moonrocks_spent: 10,
             moonrocks_earned: 0,
@@ -62,8 +97,29 @@ impl GameData {
             pulled_orbs_effects: Vec::new(),
         }
     }
+
+    pub fn next_level_game_data(&self) -> Self {
+        let new_game_data = GameData::new();
+        let pullable_orb_effects: Vec<OrbEffect> = self
+            .all_orbs
+            .iter()
+            .flat_map(|orb| orb.to_orb_effects())
+            .collect();
+
+        GameData {
+            level: self.level + 1,
+            milestone: Self::MILESTONES[self.level as usize],
+            glitch_chips: self.glitch_chips,
+            moonrocks_spent: self.moonrocks_spent,
+            moonrocks_earned: self.moonrocks_earned,
+            all_orbs: self.all_orbs,
+            pullable_orb_effects,
+            ..new_game_data
+        }
+    }
 }
 
+#[derive(Clone, Copy)]
 pub struct Orb {
     pub effect: OrbEffect,
     pub rarity: OrbRarity,
@@ -180,13 +236,14 @@ impl Orb {
     }
 }
 
+#[derive(Clone, Copy)]
 pub enum OrbRarity {
     Common,
     Rare,
     Cosmic,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub enum OrbEffect {
     Point(u32),
     PointPerOrbRemaining(u32),
@@ -201,6 +258,7 @@ pub enum OrbEffect {
     BombImmunity,
 }
 
+#[derive(Clone, Copy)]
 pub enum Buyable {
     No,
     Yes { base_price: u32, current_price: u32 },
