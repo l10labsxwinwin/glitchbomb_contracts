@@ -1,5 +1,3 @@
-use std::array;
-
 pub enum Game {
     New,
     InLevel { game_data: GameData },
@@ -40,20 +38,28 @@ pub struct GameData {
 }
 
 impl GameData {
-    fn new() -> Self {
+    const MILESTONES: [u32; 7] = [12, 18, 28, 44, 70, 100, 150];
+
+    pub fn new() -> Self {
+        let all_orbs = Orb::all_orbs();
+        let pullable_orb_effects = all_orbs
+            .iter()
+            .flat_map(|orb| orb.to_orb_effects())
+            .collect();
+
         Self {
             level: 1,
             points: 0,
-            milestone: 12,
+            milestone: Self::MILESTONES[0],
             hp: 5,
             max_hp: 5,
             multiplier: 1.,
             glitch_chips: 0,
             moonrocks_spent: 10,
             moonrocks_earned: 0,
-            all_orbs: Orb::all_orbs(),
-            pullable_orb_effects: todo!(),
-            pulled_orbs_effects: todo!(),
+            all_orbs,
+            pullable_orb_effects,
+            pulled_orbs_effects: Vec::new(),
         }
     }
 }
@@ -168,6 +174,10 @@ impl Orb {
             Self::bomb_immunity(0, OrbRarity::Cosmic, Buyable::buyable(24)),
         ]
     }
+
+    pub fn to_orb_effects(&self) -> Vec<OrbEffect> {
+        vec![self.effect.clone(); self.count as usize]
+    }
 }
 
 pub enum OrbRarity {
@@ -176,6 +186,7 @@ pub enum OrbRarity {
     Cosmic,
 }
 
+#[derive(Clone)]
 pub enum OrbEffect {
     Point(u32),
     PointPerOrbRemaining(u32),
@@ -205,5 +216,16 @@ impl Buyable {
             base_price,
             current_price: base_price,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_pullable_orb_effects_count() {
+        let game_data = GameData::new();
+        assert_eq!(game_data.pullable_orb_effects.len(), 11);
     }
 }
