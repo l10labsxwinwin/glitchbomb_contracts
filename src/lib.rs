@@ -4,6 +4,7 @@ pub enum Game {
     New,
     Level { game_data: GameData },
     LevelComplete { game_data: GameData },
+    FiveOrDiePhase { game_data: GameData },
     Shop { game_data: GameData },
     GameOver { moonrocks_diff: i32 },
 }
@@ -14,6 +15,7 @@ pub enum Action {
     CashOut,
     EnterShop,
     BuyOrb(InShopSlot),
+    ConfirmFiveOrDie(bool),
     GoToNextLevel,
 }
 
@@ -30,12 +32,195 @@ pub enum ActionError {
     InvalidActionInNewGame,
     InvalidActionInLevel,
     InvalidActionInLevelComplete,
+    InvalidActionInFiveOrDiePhase,
     MilestoneNotMetYet,
     NoPointsToCashOut,
     InvalidActionInShop,
     OrbTooExpensive,
     BrokenErrorNonBuyableInShop,
     GameOver,
+}
+
+enum OrbEffectResult {
+    Continue,
+    GameStateChanged,
+}
+
+fn apply_orb_effect(
+    effect: OrbEffect,
+    game_data: &mut GameData,
+    game: &mut Game,
+) -> OrbEffectResult {
+    match effect {
+        OrbEffect::Point(points) => handle_point_effect(points, game_data),
+        OrbEffect::PointPerOrbRemaining(point_per_orb) => {
+            handle_point_per_orb_remaining_effect(point_per_orb, game_data)
+        }
+        OrbEffect::PointPerBombPulled(point_per_bomb_pulled) => {
+            handle_point_per_bomb_pulled_effect(point_per_bomb_pulled, game_data)
+        }
+        OrbEffect::GlitchChips(glitch_chips) => handle_glitch_chips_effect(glitch_chips, game_data),
+        OrbEffect::Moonrocks(moonrocks) => handle_moonrocks_effect(moonrocks, game_data),
+        OrbEffect::Health(healing) => handle_health_effect(healing, game_data),
+        OrbEffect::Bomb(damage) => handle_bomb_effect(damage, game_data),
+        OrbEffect::Multiplier(additional_mult) => {
+            handle_multiplier_effect(additional_mult, game_data)
+        }
+        OrbEffect::PointRewind => handle_point_rewind_effect(game_data),
+        OrbEffect::FiveOrDie => handle_five_or_die_effect(game_data, game),
+        OrbEffect::BombImmunity(turns) => handle_bomb_immunity_effect(turns, game_data),
+    }
+}
+
+fn handle_point_effect(points: u32, game_data: &mut GameData) -> OrbEffectResult {
+    let total_points = (points as f32 * game_data.multiplier).floor() as u32;
+    game_data.points += total_points;
+    OrbEffectResult::Continue
+}
+
+fn handle_point_per_orb_remaining_effect(
+    point_per_orb: u32,
+    game_data: &mut GameData,
+) -> OrbEffectResult {
+    let num_orbs = game_data.pullable_orb_effects.iter().count() as f32;
+    let total_points = (num_orbs * point_per_orb as f32 * game_data.multiplier).floor() as u32;
+    game_data.points += total_points;
+    OrbEffectResult::Continue
+}
+
+fn handle_point_per_bomb_pulled_effect(
+    point_per_bomb_pulled: u32,
+    game_data: &mut GameData,
+) -> OrbEffectResult {
+    let bombs_pulled = game_data
+        .pulled_orbs_effects
+        .iter()
+        .filter(|effect| match effect {
+            OrbEffect::Bomb(_) => true,
+            _ => false,
+        })
+        .count() as f32;
+    let total_points =
+        (bombs_pulled * point_per_bomb_pulled as f32 * game_data.multiplier).floor() as u32;
+    game_data.points += total_points;
+    OrbEffectResult::Continue
+}
+
+fn handle_glitch_chips_effect(glitch_chips: u32, game_data: &mut GameData) -> OrbEffectResult {
+    game_data.glitch_chips += glitch_chips;
+    OrbEffectResult::Continue
+}
+
+fn handle_moonrocks_effect(moonrocks: u32, game_data: &mut GameData) -> OrbEffectResult {
+    game_data.moonrocks_earned += moonrocks;
+    OrbEffectResult::Continue
+}
+
+fn handle_health_effect(healing: u32, game_data: &mut GameData) -> OrbEffectResult {
+    game_data.hp = (game_data.hp + healing).min(game_data.max_hp);
+    OrbEffectResult::Continue
+}
+
+fn handle_bomb_effect(damage: u32, game_data: &mut GameData) -> OrbEffectResult {
+    if game_data.bomb_immunity_turns == 0 {
+        game_data.hp = match game_data.hp > damage {
+            true => game_data.hp - damage,
+            false => 0,
+        }
+    }
+    OrbEffectResult::Continue
+}
+
+fn handle_multiplier_effect(additional_mult: f32, game_data: &mut GameData) -> OrbEffectResult {
+    game_data.multiplier += additional_mult;
+    OrbEffectResult::Continue
+}
+
+fn handle_point_rewind_effect(game_data: &mut GameData) -> OrbEffectResult {
+    let mut lowest_point_index = None;
+    let mut lowest_point_value = 777;
+
+    for (index, effect) in game_data.pulled_orbs_effects.iter().enumerate() {
+        if let OrbEffect::Point(points) = effect {
+            if *points < lowest_point_value {
+                lowest_point_value = *points;
+                lowest_point_index = Some(index);
+            }
+        }
+    }
+    if let Some(index) = lowest_point_index {
+        let point_effect = game_data.pulled_orbs_effects.remove(index);
+        game_data.pullable_orb_effects.push(point_effect);
+    }
+    OrbEffectResult::Continue
+}
+
+fn handle_five_or_die_effect(game_data: &GameData, game: &mut Game) -> OrbEffectResult {
+    *game = Game::FiveOrDiePhase {
+        game_data: game_data.clone(),
+    };
+    OrbEffectResult::GameStateChanged
+}
+
+fn handle_bomb_immunity_effect(turns: u32, game_data: &mut GameData) -> OrbEffectResult {
+    game_data.bomb_immunity_turns += turns + 1;
+    OrbEffectResult::Continue
+}
+
+fn handle_five_or_die_pulls(mut game_data: GameData) -> Game {
+    let mut rng = rand::rng();
+    game_data.pullable_orb_effects.shuffle(&mut rng);
+
+    // Temporarily remove all FiveOrDie orbs to prevent infinite loops
+    let mut fiveordie_orbs = Vec::new();
+    game_data.pullable_orb_effects.retain(|effect| {
+        if matches!(effect, OrbEffect::FiveOrDie) {
+            fiveordie_orbs.push(*effect);
+            false
+        } else {
+            true
+        }
+    });
+
+    let mut effects_applied = 0;
+
+    while effects_applied < 5 {
+        match game_data.pullable_orb_effects.pop() {
+            Some(effect) => {
+                // Apply the effect
+                let mut temp_game = Game::Level {
+                    game_data: game_data.clone(),
+                };
+                game_data.pulled_orbs_effects.push(effect);
+                apply_orb_effect(effect, &mut game_data, &mut temp_game);
+
+                // Update bomb immunity
+                if game_data.bomb_immunity_turns > 0 {
+                    game_data.bomb_immunity_turns -= 1;
+                }
+
+                effects_applied += 1;
+
+                // Check win/lose conditions after each pull
+                if game_data.points >= game_data.milestone {
+                    // Add FiveOrDie orbs back before returning
+                    game_data.pullable_orb_effects.extend(fiveordie_orbs);
+                    return Game::LevelComplete { game_data };
+                } else if game_data.hp == 0 {
+                    let moonrocks_diff = calculate_moonrocks_diff(&game_data);
+                    return Game::GameOver { moonrocks_diff };
+                }
+            }
+            None => {
+                let moonrocks_diff = calculate_moonrocks_diff(&game_data);
+                return Game::GameOver { moonrocks_diff };
+            }
+        }
+    }
+
+    // Add the FiveOrDie orbs back to pullable effects
+    game_data.pullable_orb_effects.extend(fiveordie_orbs);
+    Game::Level { game_data }
 }
 
 pub fn perform_action(game: &mut Game, action: Action) -> Result<(), ActionError> {
@@ -55,7 +240,17 @@ pub fn perform_action(game: &mut Game, action: Action) -> Result<(), ActionError
             match game_data.pullable_orb_effects.pop() {
                 Some(effect) => {
                     game_data.pulled_orbs_effects.push(effect);
-                    // apply effect: todo
+
+                    // apply pulled effect
+                    match apply_orb_effect(effect, &mut game_data, game) {
+                        OrbEffectResult::Continue => {}
+                        OrbEffectResult::GameStateChanged => return Ok(()),
+                    }
+
+                    // update bomb immunity
+                    if game_data.bomb_immunity_turns > 0 {
+                        game_data.bomb_immunity_turns -= 1;
+                    }
 
                     // check if win/lose/continue
                     match (game_data.points >= game_data.milestone, game_data.hp == 0) {
@@ -185,10 +380,26 @@ pub fn perform_action(game: &mut Game, action: Action) -> Result<(), ActionError
             };
             Ok(())
         }
+        (Game::FiveOrDiePhase { game_data }, Action::ConfirmFiveOrDie(decision)) => {
+            let game_data = game_data.clone();
+            match decision {
+                true => {
+                    *game = handle_five_or_die_pulls(game_data);
+                    Ok(())
+                }
+                false => {
+                    *game = Game::Level { game_data };
+                    Ok(())
+                }
+            }
+        }
         (Game::New, _) => Err(ActionError::InvalidActionInNewGame),
         (Game::Level { .. }, _) => Err(ActionError::InvalidActionInLevel),
         (Game::LevelComplete { .. }, _) => Err(ActionError::InvalidActionInLevelComplete),
         (Game::Shop { .. }, _) => Err(ActionError::InvalidActionInShop),
+        (Game::FiveOrDiePhase { game_data: _ }, _) => {
+            Err(ActionError::InvalidActionInFiveOrDiePhase)
+        }
         (Game::GameOver { .. }, _) => Err(ActionError::GameOver),
     }
 }
@@ -216,6 +427,8 @@ pub struct GameData {
     pub sale_orbs_indices: Vec<usize>,
     pub pullable_orb_effects: Vec<OrbEffect>,
     pub pulled_orbs_effects: Vec<OrbEffect>,
+
+    pub bomb_immunity_turns: u32,
 }
 
 impl GameData {
@@ -243,6 +456,7 @@ impl GameData {
             sale_orbs_indices: Vec::new(),
             pullable_orb_effects,
             pulled_orbs_effects: Vec::new(),
+            bomb_immunity_turns: 0,
         }
     }
 
@@ -346,7 +560,7 @@ impl Orb {
     }
 
     pub fn bomb_immunity(count: u32, rarity: OrbRarity, buyable: Buyable) -> Self {
-        Self::new(OrbEffect::BombImmunity, rarity, count, buyable)
+        Self::new(OrbEffect::BombImmunity(3), rarity, count, buyable)
     }
 
     pub fn all_orbs() -> [Orb; 21] {
@@ -422,7 +636,7 @@ pub enum OrbEffect {
     Multiplier(f32),
     PointRewind,
     FiveOrDie,
-    BombImmunity,
+    BombImmunity(u32),
 }
 
 #[derive(Clone, Copy)]
