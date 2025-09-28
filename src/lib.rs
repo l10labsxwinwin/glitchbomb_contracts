@@ -41,9 +41,10 @@ pub enum ActionError {
 pub fn perform_action(game: &mut Game, action: Action) -> Result<(), ActionError> {
     match (&game, action) {
         (Game::New, Action::StartGame) => {
-            *game = Game::Level {
-                game_data: GameData::new(),
-            };
+            let mut game_data = GameData::new();
+            game_data.moonrocks_spent += GameData::LEVEL_COST_IN_MOONROCKS[0];
+
+            *game = Game::Level { game_data };
             Ok(())
         }
         (Game::Level { game_data }, Action::PullOrb) => {
@@ -142,10 +143,13 @@ pub fn perform_action(game: &mut Game, action: Action) -> Result<(), ActionError
             sale_orbs_indices.extend(selected_cosmic);
             assert!(sale_orbs_indices.len() == 6);
 
-            let game_data = GameData {
+            let mut game_data = GameData {
                 sale_orbs_indices,
                 ..game_data.clone()
             };
+
+            game_data.moonrocks_spent +=
+                GameData::LEVEL_COST_IN_MOONROCKS[game_data.level as usize];
 
             *game = Game::Shop { game_data };
             Ok(())
@@ -216,6 +220,7 @@ pub struct GameData {
 
 impl GameData {
     const MILESTONES: [u32; 7] = [12, 18, 28, 44, 70, 100, 150];
+    const LEVEL_COST_IN_MOONROCKS: [u32; 7] = [10, 1, 2, 4, 6, 9, 13];
 
     pub fn new() -> Self {
         let all_orbs = Orb::all_orbs();
